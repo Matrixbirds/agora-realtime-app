@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Web Rtm Advanced Sample</title>
+</head>
+<body>
+  <div class="agora-theme">
+    <div class="login">
+      <form id="content">
+        <span>
+          <label for="account">account: </label>
+          <input type="text" name="account"/>
+        </span>
+        <span>
+          <label for="channel">channel: </label>
+          <input type="text" name="channel"/>
+        </span>
+        <span>
+          <div class="switch">
+            <h6 style="color: rgba(0,0,0,.26);">Teacher</h6>
+            <label>
+              <input id="teacher" type="checkbox">
+              <span class="lever"></span>
+            </label>
+          </div>
+        </span>
+        <button class="btn" id="login">login</button>
+        <button class="btn" id="logout">logout</button>
+      </form>
+    </div>
+    <div class="classroom">
+      <div id="video">
+        <div class="video-view">
+          <span>role: <span id="role"></span></span>
+          <div id="local_stream" class="video-placeholder">
+          </div>
+          <div id="local_video_info" class="video-profile hide"></div>
+          <div id="video_autoplay_local" class="autoplay-fallback hide"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
