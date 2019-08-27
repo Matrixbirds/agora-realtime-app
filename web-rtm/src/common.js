@@ -74,7 +74,7 @@ export function serializeFormData(id) {
   return obj;
 }
 
-export function addView (id) {
+export function addView (id, account) {
   if (!$("#" + id)[0]) {
     $("<div/>", {
       id: "remote_video_panel_" + id,
@@ -98,6 +98,7 @@ export function addView (id) {
         text: action
       })
       item.attr("data-uid", id);
+      item.attr("data-account", account);
       item.appendTo("#uid_" + id);
     })
 

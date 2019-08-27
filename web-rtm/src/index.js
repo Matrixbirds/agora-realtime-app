@@ -3,12 +3,11 @@ import {getDevices, serializeFormData, validator, resolutions} from './common';
 import "./assets/style.scss";
 import {Toast} from './common';
 import * as M from 'materialize-css';
-import {setFormData, parseFromSearch} from './searchParam';
 import RtmClient from './rtm-client';
 
 let role = "audience"
 
-const appID = 'agora appid'
+const appID = 'your app id'
 
 const rtmClient = new RtmClient(appID);
 
@@ -27,8 +26,8 @@ $(() => {
   rtmClient.on('MessageFromPeer', (message, peerId) => {
     console.log("MessageFromPeer ", message, peerId);
   })
-  rtmClient.on("RemoteInvitationAccepted", ({callerId, response}) => {
-    console.log("RemoteInvitationAccepted", callerId, response);
+  rtmClient.on("RemoteInvitationAccepted", ({callerId}) => {
+    console.log("RemoteInvitationAccepted", callerId);
   });
   rtmClient.on("RemoteInvitationCanceled", ({callerId}) => {
     console.log("RemoteInvitationCanceled", callerId);
@@ -39,7 +38,20 @@ $(() => {
   rtmClient.on("RemoteInvitationRefused", ({callerId}) => {
     console.log("RemoteInvitationRefused", callerId);
   });
-  rtmClient.on("LocalInvitationAccepted", ({calleeId, response}) => {
+  rtmClient.on("LocalInvitationAccepted", async ({calleeId, response}) => {
+    const json = JSON.parse(response);
+    const res = {
+      video: json.video != undefined ? json.video : true,
+      audio: json.video != undefined ? json.video : true,
+    }
+    await rtmClient.sendChannelMessage(json.channel, JSON.stringify({}));
+    for (let memberAttr of rtmClient.memberAttrs) {
+      if (memberAttr.account == calleeId) {
+        memberAttr.video = res.video
+        memberAttr.audio = res.audio
+      }
+    }
+    rtmClient.memberAttrs = rtmClient.memberAttrs;
     console.log("LocalInvitationAccepted", calleeId);
   });
   rtmClient.on("LocalInvitationFailure", ({calleeId, reason}) => {
@@ -56,8 +68,21 @@ $(() => {
   });
   rtmClient.on("RemoteInvitationReceived", (remoteInvitation) => {
     rtmClient.remoteInvitations = remoteInvitation;
+    const resp = JSON.parse(remoteInvitation.response);
+    if (resp.video === true) {
+      rtmClient._rtc.localStream.unmuteVideo();
+    } else if (resp.video === false) {
+      rtmClient._rtc.localStream.muteVideo();
+    }
+    if (resp.audio === true) {
+      rtmClient._rtc.localStream.unmuteAudio();
+    } else if (resp.audio === false) {
+      rtmClient._rtc.localStream.muteAudio();
+    }
+    remoteInvitation.accept();
     console.log("RemoteInvitationReceived", remoteInvitation);
   })
+  // note: @care
   rtmClient.on("ConnectionStateChanged", (state, reason) => {
     console.log('state', state, 'reason', reason);
   })
@@ -90,22 +115,26 @@ $(() => {
     $("#role").text('');
   })
 
-  $("body").on("click", ".muteVideo", (e) => {
+  $("body").on("click", ".muteVideo", async (e) => {
     e.preventDefault();
+    const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
-    console.log('uid', uid);
+    if (role == 'host') {
+      let peer = rtmClient.memberAttrs.find(item => item.account == account);
+      await rtmClient.sendInvitation(account, {muteVideo: peer.video ? false : true})
+    }
+    console.log('account', account, 'uid', uid);
   })
 
   $("body").on("click", ".muteAudio", (e) => {
     e.preventDefault();
+    const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
-    console.log('uid', uid);
-  })
-
-  $(".kick").on("click", (e) => {
-    e.preventDefault();
-    const uid = $(e.target).attr('data-uid');
-    console.log('uid', uid);
+    if (role == 'host') {
+      let peer = rtmClient.memberAttrs.find(item => item.account == account);
+      await rtmClient.sendInvitation(account, {muteAudio: peer.audio ? false : true})
+    }
+    console.log('account', account, 'uid', uid);
   })
 
   $("#teacher").on("change", (e) => {

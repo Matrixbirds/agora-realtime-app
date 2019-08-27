@@ -43,7 +43,8 @@ export default class RTCClient {
     this._client.subscribe(stream, cb);
   }
 
-  join (data) {
+  join (data, account) {
+    this._account = account;
     return new Promise((resolve, reject) => {    
       if (this._joined) {
         Toast.error("Your already joined");
@@ -129,6 +130,7 @@ export default class RTCClient {
                 text: action
               })
               item.attr("data-uid", id);
+              item.attr("data-account", this._account);
               item.appendTo("#uid_" + id);
             })
             // run callback

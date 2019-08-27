@@ -8,12 +8,33 @@ export default class RtmClient {
     this._appId = appId;
     this._rtm = rtm.createInstance(appId);
     this._rtc = new RTCClient();
-    this.members = [];
+    this.memberAttrs = [];
     this._state = null;
-    this._channels = {}
+    this._channels = {};
     this._localInvitations = {};
     this._remoteInvitations = {};
     this._bus = new EventEmitter();
+    this._account = null;
+    this._currentChannelName = null;
+  }
+
+  set memberAttrs (val) {
+    this._memberAttrs = val;
+    saveStorage();
+  }
+
+  get memberAttrs () {
+    return this._memberAttrs;
+  }
+
+  saveStorage () {
+    localStorage.setItem(this._currentChannelName, JSON.stringify(this._memberAttrs));
+  }
+
+  static readStorage (channelName) {
+    let res = localStorage.getItem(channelName);
+    let json = JSON.parse(res);
+    return json;
   }
 
   set remoteInvitations(val) {
@@ -43,6 +64,7 @@ export default class RtmClient {
   async login (account) {
     let res = await this._rtm.login({uid: account});
     this._state = 'login'
+    this._account = account
     return res;
   }
 
@@ -127,10 +149,12 @@ export default class RtmClient {
       uid: 0,
       mode: 'rtc',
       codec: 'h264'
-    })
+    }, this._account);
     this._rtc.on("error", (err) => {
       console.log(err)
     })
+
+    this._currentChannelName = name;
     // Occurs when the peer user leaves the channel; for example, the peer user calls Client.leave.
     this._rtc.on("peer-leave", (evt) => {
       const id = evt.uid;
@@ -149,10 +173,11 @@ export default class RtmClient {
     this._rtc.on("stream-added", async (evt) => {
       console.log("stream-added stream ", evt.stream);
       const memberAttrs = await this.fetchMembers(name);
-      this.members = memberAttrs.filter(item => item.uid).map(item => +item.uid)
+      this.memberAttrs = memberAttrs;
+      const members = this.memberAttrs.filter(item => item.uid).map(item => +item.uid)
       const remoteStream = evt.stream;
       const id = remoteStream.getId();
-      if (id !== this._uid && this.members.indexOf(id) != -1) {
+      if (id !== this._uid && members.indexOf(id) != -1) {
         // Toast.info("subscribe uid: " + id)
         this._rtc.subscribe(remoteStream, (err) => {
           console.log("stream subscribe failed", err);
@@ -165,7 +190,11 @@ export default class RtmClient {
       const remoteStream = evt.stream;
       const id = remoteStream.getId();
       this._rtc.remoteStreams.push(remoteStream);
-      addView(id);
+      console.log("this.memberAttrs", this.memberAttrs);
+      const member = this.memberAttrs.find(item => +item.uid === id);
+      console.log("find caccount >> ", member.account);
+      const account = member.account;
+      addView(id, account);
       remoteStream.play("remote_video_" + id, {fit: "cover"});
       // Toast.info('stream-subscribed remote-uid: ' + id);
       console.log('stream-subscribed remote-uid: ', id);
@@ -194,14 +223,15 @@ export default class RtmClient {
       Toast.info("onTokenPrivilegeDidExpire");
       console.log("onTokenPrivilegeDidExpire");
     })
+    // note: @care
     this._rtc.on("connection-state-change", (evt) => {
       console.log("rtc.connection-state-change", evt.prevState, evt.curState);
     })
     
     await this.setLocalUserAttrs(name, uid);
     this._uid = uid;
-    let memberAttrs = await this.fetchMembers(name);
-    this.members = Object.values(memberAttrs).map(item => +item);
+    // let memberAttrs = await this.fetchMembers(name);
+    // this.members = Object.values(memberAttrs).map(item => +item);
     await this._rtc.publish();
     return res;
   }
@@ -221,8 +251,9 @@ export default class RtmClient {
     }
   }
 
-  async sendInvitation(calleeId) {
+  async sendInvitation(calleeId, content) {
     this._localInvitations[calleeId] = this._rtm.createLocalInvitation(calleeId);
+    this._localInvitations[calleeId].content = JSON.stringify(content);
     this._localInvitations[calleeId].on("LocalInvitationAccepted", (response) => {
       this._bus.emit("LocalInvitationAccepted", {calleeId, response})
       console.log("LocalInvitationAccepted", response)
