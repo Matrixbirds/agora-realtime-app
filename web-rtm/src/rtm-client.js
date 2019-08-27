@@ -27,6 +27,8 @@ export default class RtmClient {
     return this._memberAttrs;
   }
 
+  // note: @care
+  // 还有个离线问题没处理
   saveStorage () {
     localStorage.setItem(this._currentChannelName, JSON.stringify(this._memberAttrs));
   }
