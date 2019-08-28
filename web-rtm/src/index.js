@@ -1,4 +1,3 @@
-import RTCClient from './rtc-client';
 import {getDevices, serializeFormData, validator, resolutions} from './common';
 import "./assets/style.scss";
 import {Toast} from './common';
@@ -7,89 +6,87 @@ import RtmClient from './rtm-client';
 
 let role = "audience"
 
-const appID = 'your app id'
+const appID = 'Agora.io appID'
 
 const rtmClient = new RtmClient(appID);
 
 window.rtmClient = rtmClient
 window.rtc = rtmClient._rtc;
 $(() => {
-  rtmClient.on('ChannelMessage', ({name, message, memberId}) => {
-    this._bus.emit("ChannelMessage", {name, message, memberId});
+  rtmClient.on('ChannelMessage', async ({name, message, memberId}) => {
+    const text = message.text
+    const sync_data = text.match(/sync_data/);
+    if (sync_data) {
+      const payload = JSON.parse(text);
+      const body = payload.body
+      rtmClient.updateMemberByAccount(body);
+    }
+    console.log("name", name, "message", message.text, "memberId", memberId);
   })
   rtmClient.on("MemberJoined", ({name, memberId}) => {
     Toast.info(`MemberJoined name: ${name}, memberId: ${memberId}`)
   })
   rtmClient.on("MemberLeft", ({name, memberId}) => {
+    rtmClient.removeMemberByAccount(memberId);
     Toast.info(`MemberLeft name: ${name}, memberId: ${memberId}`)
   })
   rtmClient.on('MessageFromPeer', (message, peerId) => {
     console.log("MessageFromPeer ", message, peerId);
   })
   rtmClient.on("RemoteInvitationAccepted", ({callerId}) => {
-    console.log("RemoteInvitationAccepted", callerId);
-  });
-  rtmClient.on("RemoteInvitationCanceled", ({callerId}) => {
-    console.log("RemoteInvitationCanceled", callerId);
+    console.log("已同意远程邀请", callerId);
   });
   rtmClient.on("RemoteInvitationFailure", ({callerId, reason}) => {
     console.log("RemoteInvitationFailure", callerId, reason);
   });
-  rtmClient.on("RemoteInvitationRefused", ({callerId}) => {
-    console.log("RemoteInvitationRefused", callerId);
-  });
+  // 学生同意老师邀请
   rtmClient.on("LocalInvitationAccepted", async ({calleeId, response}) => {
-    const json = JSON.parse(response);
-    const res = {
-      video: json.video != undefined ? json.video : true,
-      audio: json.video != undefined ? json.video : true,
-    }
-    await rtmClient.sendChannelMessage(json.channel, JSON.stringify({}));
-    for (let memberAttr of rtmClient.memberAttrs) {
-      if (memberAttr.account == calleeId) {
-        memberAttr.video = res.video
-        memberAttr.audio = res.audio
+    if (rtmClient._role == 'host') {
+      if (response.match(/answer_media/)) {
+        const json = JSON.parse(response)
+        const body = json.body;
+        body.account = calleeId;
+        await rtmClient.sendChannelMessage(rtmClient._currentChannelName, JSON.stringify({cmd: 'sync_data', body: body}));
       }
     }
-    rtmClient.memberAttrs = rtmClient.memberAttrs;
-    console.log("LocalInvitationAccepted", calleeId);
   });
   rtmClient.on("LocalInvitationFailure", ({calleeId, reason}) => {
     console.log("LocalInvitationFailure", calleeId, reason);
   });
-  rtmClient.on("LocalInvitationRefused", ({calleeId, response}) => {
-    console.log("LocalInvitationRefused", calleeId, response);
-  });
-  rtmClient.on("LocalInvitationCanceled", ({calleeId}) => {
-    console.log("LocalInvitationCanceled", calleeId);
-  });
   rtmClient.on("LocalInvitationReceivedByPeer", ({calleeId}) => {
-    console.log("LocalInvitationReceivedByPeer", calleeId);
+    console.log("邀请到达 ", calleeId);
   });
-  rtmClient.on("RemoteInvitationReceived", (remoteInvitation) => {
+  // 学生端接受呼叫邀请屏蔽逻辑
+  rtmClient.on("RemoteInvitationReceived", async (remoteInvitation) => {
     rtmClient.remoteInvitations = remoteInvitation;
-    const resp = JSON.parse(remoteInvitation.response);
-    if (resp.video === true) {
-      rtmClient._rtc.localStream.unmuteVideo();
-    } else if (resp.video === false) {
-      rtmClient._rtc.localStream.muteVideo();
+    const resp = JSON.parse(remoteInvitation.content);
+    const cmd = resp.cmd;
+    const body = resp.body;
+    if (cmd == 'offer_media') {
+      console.log('RemoteInvitationReceived',resp);
+      if (rtmClient._role == 'audience') {
+        let res = await rtmClient.changeLocalStreamMedia(body);
+        remoteInvitation.response = JSON.stringify({cmd: 'answer_media', body: res});
+      }
+      remoteInvitation.accept();
+      console.log("收到远端邀请 ", remoteInvitation);
     }
-    if (resp.audio === true) {
-      rtmClient._rtc.localStream.unmuteAudio();
-    } else if (resp.audio === false) {
-      rtmClient._rtc.localStream.muteAudio();
+    if (cmd == 'offer_fetch_data') {
+      const channel = body.channel;
+      let res = rtmClient.readStorageByChannel(channel);
+      if (Object.keys(res).length > 0) {
+        remoteInvitation.response = JSON.stringify({cmd: 'offer_fetch_data', body: res});
+        remoteInvitation.accept();
+      }
     }
-    remoteInvitation.accept();
-    console.log("RemoteInvitationReceived", remoteInvitation);
   })
   // note: @care
-  rtmClient.on("ConnectionStateChanged", (state, reason) => {
+  rtmClient.on("ConnectionStateChanged", async (state, reason) => {
+    if (state == 'CONNECTED' && role != 'host') {
+      await rtmClient.fetchFromHost();
+    }
     console.log('state', state, 'reason', reason);
   })
-  rtmClient.on("MessageFromPeer", (message, peerId, messageProperties) => {
-    console.log('message', message, 'peerId', peerId, 'messageProperties', messageProperties);
-  })
-
   $("#login").on("click", async function (e) {
     // 阻止表单提交
     e.preventDefault();
@@ -97,6 +94,7 @@ $(() => {
     if (!validator(formData, ['account', 'channel'])) {
       return;
     }
+    rtmClient.setRole(role);
     // 登录&加入rtm频道
     await rtmClient.login(formData.account);
     await rtmClient.joinChannel(formData.channel)
@@ -119,22 +117,40 @@ $(() => {
     e.preventDefault();
     const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
+    console.log("account", account, "uid", uid);
     if (role == 'host') {
-      let peer = rtmClient.memberAttrs.find(item => item.account == account);
-      await rtmClient.sendInvitation(account, {muteVideo: peer.video ? false : true})
+      let peer = await rtmClient.findMember(account, uid);
+      if (!peer) {
+        Toast.info(`uid: ${uid} 已离开RTM`)
+        return
+      }
+      console.log('peer', peer)
+      await rtmClient.sendInvitation(peer.account,
+        {cmd: "offer_media", body: {video: peer.video}
+      })
+    } else {
+      Toast.error("当前用户不是Host角色，无权操作")
     }
-    console.log('account', account, 'uid', uid);
   })
 
-  $("body").on("click", ".muteAudio", (e) => {
+  $("body").on("click", ".muteAudio", async (e) => {
     e.preventDefault();
     const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
-    if (role == 'host') {
-      let peer = rtmClient.memberAttrs.find(item => item.account == account);
-      await rtmClient.sendInvitation(account, {muteAudio: peer.audio ? false : true})
-    }
     console.log('account', account, 'uid', uid);
+    if (role == 'host') {
+      let peer = await rtmClient.findMember(account, uid);
+      if (!peer) {
+        Toast.info(`uid: ${uid} 已离开RTM`)
+        return
+      }
+      console.log('peer', peer)
+      await rtmClient.sendInvitation(peer.account,
+        {cmd: "offer_media", body: {audio: peer.audio}
+      })
+    } else {
+      Toast.error("当前用户不是Host角色，无权操作")
+    }
   })
 
   $("#teacher").on("change", (e) => {

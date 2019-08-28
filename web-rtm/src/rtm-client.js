@@ -16,27 +16,95 @@ export default class RtmClient {
     this._bus = new EventEmitter();
     this._account = null;
     this._currentChannelName = null;
+    this._role = 'audience';
+  }
+
+  setRole(role) {
+    this._role = role;
   }
 
   set memberAttrs (val) {
     this._memberAttrs = val;
-    saveStorage();
+    this.saveStorage();
   }
 
   get memberAttrs () {
     return this._memberAttrs;
   }
 
+  async fetchFromHost() {
+    let members = await this.fetchMembers();
+    if (members) {
+      const host = members.find(member => member.role == 'host');
+      if (host && this._role != 'host') {
+        await this.sendInvitation(host.account, {cmd: 'offer_fetch_data', body: {channel: this._currentChannelName}});
+      }
+    }
+  }
+
   // note: @care
   // 还有个离线问题没处理
   saveStorage () {
     localStorage.setItem(this._currentChannelName, JSON.stringify(this._memberAttrs));
+    console.log("storage", localStorage.getItem(this._currentChannelName))
+  }
+
+  readStorage () {
+    let res = localStorage.getItem(this._currentChannelName);
+    let json = JSON.parse(res);
+    return json;
+  }
+
+  readStorageByChannel(name) {
+    console.log("获取",name, "的频道信息");
+    let res = localStorage.getItem(name) || {};
+    let json = JSON.parse(res);
+    return json;
   }
 
   static readStorage (channelName) {
     let res = localStorage.getItem(channelName);
     let json = JSON.parse(res);
     return json;
+  }
+
+  async changeLocalStreamMedia(mediaAttr) {
+    let video = "true";
+    let audio = "true";
+    if (mediaAttr.video) {
+      if (mediaAttr.video === "true") {
+        this._rtc.localStream.muteVideo();
+        video = "false";
+        console.log('mute视频')
+      } else {
+        this._rtc.localStream.unmuteVideo();
+        video = "true";
+        console.log('unmute视频')
+      }
+    }
+
+    if (mediaAttr.audio) {
+      if (mediaAttr.audio === "true") {
+        this._rtc.localStream.muteAudio();
+        audio = "false";
+        console.log('mute音频')
+      } else {
+        this._rtc.localStream.unmuteAudio();
+        audio = "true";
+        console.log('unmute音频')
+      }
+    }
+
+    await this.addOrUpdateLocalUserAttributes(video, audio);
+    console.log("mediaAttr", mediaAttr, ` video, ${video}, audio: ${audio}`);
+    return {
+      video,
+      audio
+    }
+  }
+
+  changeLocalStreamScreenSharing() {
+
   }
 
   set remoteInvitations(val) {
@@ -56,11 +124,23 @@ export default class RtmClient {
     })
   }
 
-  async setLocalUserAttrs(name, uid) {
+  async setLocalUserAttrs(name, account, uid, video, audio) {
     await this._rtm.setLocalUserAttributes({
         channel: `${name}`,
-        uid: `${uid}`
+        account: `${account}`,
+        uid: `${uid}`,
+        role: `${this._role}`,
+        video: `${video === true}`,
+        audio: `${audio === true}`,
     });
+  }
+
+  async addOrUpdateLocalUserAttributes(video, audio) {
+    await this._rtm.addOrUpdateLocalUserAttributes({
+      audio,
+      video
+    })
+    await this.fetchMembers();
   }
 
   async login (account) {
@@ -78,7 +158,50 @@ export default class RtmClient {
     }
   }
 
-  async fetchMembers (name) {
+  async findMember(account, uid) {
+    const members = await this.fetchMembers();
+    if (account) {
+      return members
+        .find((member) => member.account == account);
+    }
+
+    if (uid) {
+      return members
+        .find((member) => member.uid == uid);
+    }
+    
+  }
+
+  updateMemberByAccount(body) {
+    const account = body.account;
+    let local = this.readStorage();
+    if (local) {
+      for (let member of local) {
+        if (member.account == account) {
+          Object.assign(member, body);
+        }
+      }
+      this.memberAttrs = local;
+      console.log("updateMemberByAccount 执行成功>>>", this.memberAttrs)
+      return true;
+    } else {
+      console.log("updateMemberByAccount 尚未执行>>>")
+    }
+  }
+
+  removeMemberByAccount(account) {
+    let local = this.readStorage();
+    if (local) {
+      this.memberAttrs = local.filter((member) => member.account != account);
+      console.log("removeMemberByAccount 执行成功>>>", this.memberAttrs)
+      return true;
+    } else {
+      console.log("removeMemberByAccount 尚未执行>>>")
+    }
+  }
+
+  async fetchMembers () {
+    const name = this._currentChannelName;
     const channelObj = this._channels[name];
     const map = [];
     if (this._state == 'login' && channelObj) {
@@ -86,11 +209,9 @@ export default class RtmClient {
       const members = this._channels[name].members = res
       for (let account of members) {
         let res = await this._rtm.getUserAttributes(account);
-        map.push({
-          uid: res.uid,
-          account
-        })
+        map.push(res);
       }
+      this.memberAttrs = map;
       return map;
     }
   }
@@ -112,11 +233,14 @@ export default class RtmClient {
     ];
 
     // 另处理邀请事件
-    if (events.indexOf(eventName)) {
+    if (events.indexOf(eventName) != -1) {
       this._bus.on(eventName, evtCallback);
       return;
     }
-    this._rtm.on(eventName, evtCallback);
+    this._rtm.on(eventName, (evt) => {
+      console.log("evt", evt);
+      evtCallback(evt)
+    });
   }
 
   async sendPeerMessage(message, account) {
@@ -145,16 +269,6 @@ export default class RtmClient {
       members: members
     }
     const appID = this._appId;
-    let uid = await rtc.join({
-      appID,
-      channel: name,
-      uid: 0,
-      mode: 'rtc',
-      codec: 'h264'
-    }, this._account);
-    this._rtc.on("error", (err) => {
-      console.log(err)
-    })
 
     this._currentChannelName = name;
     // Occurs when the peer user leaves the channel; for example, the peer user calls Client.leave.
@@ -166,17 +280,40 @@ export default class RtmClient {
       // Toast.notice("peer leave")
       console.log('peer-leave', id);
     })
+    this._rtc.on("stream-fallback", async (evt) => {
+      const memberAttrs = await this.fetchMembers();
+      console.log("memberAttrs", JSON.stringify(memberAttrs), " id", evt.stream.getId());
+      const members = memberAttrs.filter(item => item.uid).map(item => +item.uid)
+      const remoteStream = evt.stream;
+      const id = remoteStream.getId();
+      if (id !== this._uid && members.indexOf(id) != -1) {
+        // Toast.info("subscribe uid: " + id)
+        this._rtc.subscribe(remoteStream, (err) => {
+          console.log("stream subscribe failed", err);
+        })
+      }
+    });
     // Occurs when the local stream is _published.
-    this._rtc.on("stream-published", (evt) => {
+    this._rtc.on("stream-published", async (evt) => {
       // Toast.notice("stream published success")
+      const memberAttrs = await this.fetchMembers();
+      console.log("memberAttrs", JSON.stringify(memberAttrs), " id", evt.stream.getId());
+      const members = memberAttrs.filter(item => item.uid).map(item => +item.uid)
+      const remoteStream = evt.stream;
+      const id = remoteStream.getId();
+      if (id !== this._uid && members.indexOf(id) != -1) {
+        // Toast.info("subscribe uid: " + id)
+        this._rtc.subscribe(remoteStream, (err) => {
+          console.log("stream subscribe failed", err);
+        })
+      }
       console.log("stream-published");
     })
     // Occurs when the remote stream is added.
     this._rtc.on("stream-added", async (evt) => {
       console.log("stream-added stream ", evt.stream);
-      const memberAttrs = await this.fetchMembers(name);
-      this.memberAttrs = memberAttrs;
-      const members = this.memberAttrs.filter(item => item.uid).map(item => +item.uid)
+      const memberAttrs = await this.fetchMembers();
+      const members = memberAttrs.filter(item => item.uid).map(item => +item.uid)
       const remoteStream = evt.stream;
       const id = remoteStream.getId();
       if (id !== this._uid && members.indexOf(id) != -1) {
@@ -188,12 +325,12 @@ export default class RtmClient {
       console.log('stream-added remote-uid: ', id);
     });
     // Occurs when a user subscribes to a remote stream.
-    this._rtc.on("stream-subscribed", (evt) => {
+    this._rtc.on("stream-subscribed", async (evt) => {
       const remoteStream = evt.stream;
       const id = remoteStream.getId();
       this._rtc.remoteStreams.push(remoteStream);
-      console.log("this.memberAttrs", this.memberAttrs);
-      const member = this.memberAttrs.find(item => +item.uid === id);
+      const memberAttrs = await this.fetchMembers();
+      const member = memberAttrs.find(item => +item.uid === id);
       console.log("find caccount >> ", member.account);
       const account = member.account;
       addView(id, account);
@@ -229,8 +366,40 @@ export default class RtmClient {
     this._rtc.on("connection-state-change", (evt) => {
       console.log("rtc.connection-state-change", evt.prevState, evt.curState);
     })
-    
-    await this.setLocalUserAttrs(name, uid);
+
+    let _uid = 0;
+    let _video = true;
+    let _audio = true;
+    // 从缓存读取之前用户的信息
+    const cache = this.readStorage()
+    if (cache) {
+      let me = cache.find((member) => member.account == this._account);
+
+      if (me) {
+        _uid = +me.uid
+        _video = me.video === "true"
+        _audio = me.audio === "true"
+      }
+    } else {
+      console.log('没有从本地读到频道信息，届时重新创建');
+    }
+
+    let uid = await rtc.join({
+      appID,
+      channel: name,
+      uid: _uid,
+      mode: 'rtc',
+      codec: 'h264',
+      video: true,
+      audio: true,
+      _video,
+      _audio
+    }, this._account);
+    this._rtc.on("error", (err) => {
+      console.log(err)
+    })
+    await this.setLocalUserAttrs(name, this._account, uid, true, true);
+    await this.fetchMembers();
     this._uid = uid;
     // let memberAttrs = await this.fetchMembers(name);
     // this.members = Object.values(memberAttrs).map(item => +item);

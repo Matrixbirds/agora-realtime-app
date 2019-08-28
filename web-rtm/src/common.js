@@ -75,7 +75,7 @@ export function serializeFormData(id) {
 }
 
 export function addView (id, account) {
-  if (!$("#" + id)[0]) {
+  if (!$("#remote_video_" + id)[0]) {
     $("<div/>", {
       id: "remote_video_panel_" + id,
       class: "video-view",

@@ -6,7 +6,7 @@ console.log("agora sdk version: " + AgoraRTC.VERSION + " compatible: " + AgoraRT
 
 export default class RTCClient {
   constructor () {
-    this._client = null;
+    this._client = AgoraRTC.createClient({mode: 'rtc', codec: 'h264'});
     this._joined = false;
     this._published = false;
     this._localStream = null;
@@ -58,7 +58,7 @@ export default class RTCClient {
        *    Ensure that you set these properties before calling Client.join.
        *  You could find more detail here. https://docs.agora.io/en/Video/API%20Reference/web/interfaces/agorartc.clientconfig.html
       **/
-      this._client = AgoraRTC.createClient({mode: data.mode, codec: data.codec});
+      
     
       this._params = data;
         
@@ -91,15 +91,12 @@ export default class RTCClient {
           Toast.notice("join channel: " + data.channel + " success, uid: " + uid);
           console.log("join channel: " + data.channel + " success, uid: " + uid);
           this._joined = true;
-
           // create local stream
           this._localStream = AgoraRTC.createStream({
             streamID: this._params.uid,
-            audio: true,
-            video: true,
+            audio: data.audio,
+            video: data.video,
             screen: false,
-            microphoneId: data.microphoneId,
-            cameraId: data.cameraId
           });
 
           this._localStream.on("player-status-change", (evt) => {
@@ -114,25 +111,34 @@ export default class RTCClient {
           // init local stream
           this._localStream.init(() => {
             console.log("init local stream success");
+            
+            if (data._video === false) {
+              this._localStream.muteVideo();
+            }
+            if (data._audio === false) {
+              this._localStream.muteAudio();
+            }
             // play stream with html element id "local_stream"
             this._localStream.play("local_stream", {fit: "cover"});
 
             const id = this._params.uid;
-            $("<div/>", {
-              id: "uid_" + id,
-              class: "toolbar",
-            }).appendTo('#local_stream');
-    
-            const actions = ["muteVideo", "muteAudio"];
-            actions.forEach((action) => {
-              const item = $("<span/>", {
-                class: action,
-                text: action
+            
+              $("<div/>", {
+                id: "uid_" + id,
+                class: "toolbar",
+              }).appendTo('#local_stream');
+      
+              const actions = ["muteVideo", "muteAudio"];
+              actions.forEach((action) => {
+                const item = $("<span/>", {
+                  class: action,
+                  text: action
+                })
+                item.attr("data-uid", id);
+                item.attr("data-account", this._account);
+                item.appendTo("#uid_" + id);
               })
-              item.attr("data-uid", id);
-              item.attr("data-account", this._account);
-              item.appendTo("#uid_" + id);
-            })
+            
             // run callback
             resolve(this._params.uid);
           }, (err) =>  {
@@ -215,9 +221,9 @@ export default class RTCClient {
         stream.stop();
         removeView(id);
       }
+      $("#local_stream").html('')
       this._localStream = null;
       this._remoteStreams = [];
-      this._client = null;
       console.log("client leaves channel success");
       this._published = false;
       this._joined = false;
