@@ -42,12 +42,13 @@ $(() => {
   });
   // 老师的邀请被学生同意
   rtmClient.on("LocalInvitationAccepted", async ({calleeId, response}) => {
-    // 老师发送学生端accept的状态在频道内通知其他学生
+    // 老师发送给学生端
     if (rtmClient._role == 'host') {
       if (response.match(/answer_media/)) {
         const json = JSON.parse(response)
         const body = json.body;
         body.account = calleeId;
+        // 学生端同意以后 老师广播消息同步其他学生状态
         await rtmClient.sendChannelMessage(rtmClient._currentChannelName, JSON.stringify({cmd: 'sync_data', body: body}));
       }
     }
@@ -129,6 +130,15 @@ $(() => {
     e.preventDefault();
     const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
+    // host mute自己的视频
+    if (role == 'host' && account == rtmClient._account) {
+      let member = await rtmClient.findMember(account);
+      let memberAttr = await rtmClient.changeLocalStreamMedia({video: member.video})
+      await rtmClient.sendChannelMessage(rtmClient._currentChannelName, JSON.stringify({cmd: 'sync_data', body: {
+        video: memberAttr.video, audio: memberAttr.audio, account: account
+      }}));
+      return ;
+    }
     console.log("account", account, "uid", uid);
     if (role == 'host') {
       let peer = await rtmClient.findMember(account, uid);
@@ -150,6 +160,15 @@ $(() => {
     const account = $(e.target).attr('data-account');
     const uid = $(e.target).attr('data-uid');
     console.log('account', account, 'uid', uid);
+    // host mute自己的音频
+    if (role == 'host' && account == rtmClient._account) {
+      let member = await rtmClient.findMember(account);
+      await rtmClient.changeLocalStreamMedia({audio: member.audio})
+      await rtmClient.sendChannelMessage(rtmClient._currentChannelName, JSON.stringify({cmd: 'sync_data', body: {
+        video: memberAttr.video, audio: memberAttr.audio, account: account
+      }}));
+      return ;
+    }
     if (role == 'host') {
       let peer = await rtmClient.findMember(account, uid);
       if (!peer) {

@@ -70,8 +70,9 @@ export default class RtmClient {
   }
 
   async changeLocalStreamMedia(mediaAttr) {
-    let video = "true";
-    let audio = "true";
+    const local = this.findMemberByLocal(this._account);
+    let video = local ? local.video : "true";
+    let audio = local ? local.audio : "true";
     if (mediaAttr.video) {
       if (mediaAttr.video === "true") {
         this._rtc.localStream.muteVideo();
@@ -156,6 +157,15 @@ export default class RtmClient {
       let res = await this._rtm.logout();
       this._state = 'logout'
       return res;
+    }
+  }
+
+
+  findMemberByLocal(account) {
+    const local = this.readStorage();
+    if (local) {
+      let member = local.find((member) => member.account == account);
+      return member;
     }
   }
 
