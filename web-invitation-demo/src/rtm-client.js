@@ -32,6 +32,7 @@ export default class RtmClient {
     return this._memberAttrs;
   }
 
+  // 从主播端同步数据
   async fetchFromHost() {
     let members = await this.fetchMembers();
     if (members) {

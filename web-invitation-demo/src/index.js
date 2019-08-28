@@ -37,10 +37,12 @@ $(() => {
     console.log("已同意远程邀请", callerId);
   });
   rtmClient.on("RemoteInvitationFailure", ({callerId, reason}) => {
+    Toast.error(`远程邀请响应失败 ${callerId} ${reason}`)
     console.log("RemoteInvitationFailure", callerId, reason);
   });
-  // 学生同意老师邀请
+  // 老师的邀请被学生同意
   rtmClient.on("LocalInvitationAccepted", async ({calleeId, response}) => {
+    // 老师发送学生端accept的状态在频道内通知其他学生
     if (rtmClient._role == 'host') {
       if (response.match(/answer_media/)) {
         const json = JSON.parse(response)
@@ -49,8 +51,18 @@ $(() => {
         await rtmClient.sendChannelMessage(rtmClient._currentChannelName, JSON.stringify({cmd: 'sync_data', body: body}));
       }
     }
+
+    // 学生从老师的邀请里同步数据到本地
+    if (rtmClient._role == 'audience') {
+      if (response.match(/answer_fetch_data/)) {
+        const json = JSON.parse(response)
+        const body = json.body;
+        rtmClient.memberAttrs = body;
+      }
+    }
   });
   rtmClient.on("LocalInvitationFailure", ({calleeId, reason}) => {
+    Toast.error(`本地邀请响应失败 ${calleeId} ${reason}`)
     console.log("LocalInvitationFailure", calleeId, reason);
   });
   rtmClient.on("LocalInvitationReceivedByPeer", ({calleeId}) => {
@@ -75,15 +87,15 @@ $(() => {
       const channel = body.channel;
       let res = rtmClient.readStorageByChannel(channel);
       if (Object.keys(res).length > 0) {
-        remoteInvitation.response = JSON.stringify({cmd: 'offer_fetch_data', body: res});
+        remoteInvitation.response = JSON.stringify({cmd: 'answer_fetch_data', body: res});
         remoteInvitation.accept();
       }
     }
   })
   // note: @care
   rtmClient.on("ConnectionStateChanged", async (state, reason) => {
-    if (state == 'CONNECTED' && role != 'host') {
-      await rtmClient.fetchFromHost();
+    if (state == 'CONNECTED') {
+      // 当rtm网络连接成功时
     }
     console.log('state', state, 'reason', reason);
   })
@@ -153,7 +165,7 @@ $(() => {
     }
   })
 
-  $("#teacher").on("change", (e) => {
+  $("#host").on("change", (e) => {
     e.preventDefault();
     role = role == 'audience' ? 'host' : 'audience';
     console.log("change role ", role);
